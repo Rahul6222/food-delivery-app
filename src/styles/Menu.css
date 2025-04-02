@@ -1,0 +1,39 @@
+.menu {
+    text-align: center;
+    padding: 20px;
+  }
+  
+  .menu-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    padding: 20px;
+  }
+  
+  .menu-item {
+    background: white;
+    padding: 10px;
+    border-radius: 10px;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  
+  .menu-item img {
+    width: 100%;
+    border-radius: 10px;
+  }
+  
+  .menu-item button {
+    background-color: #ff6347;
+    color: white;
+    border: none;
+    padding: 10px;
+    cursor: pointer;
+    width: 100%;
+    border-radius: 5px;
+    margin-top: 10px;
+  }
+  
+  .menu-item button:hover {
+    background-color: #e5533d;
+  }
+  

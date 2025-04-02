@@ -1,0 +1,204 @@
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+require("dotenv").config();
+const express = require("express");
+const mysql = require("mysql2");
+const bcrypt = require("bcryptjs");
+const { body, validationResult } = require("express-validator");
+require("dotenv").config();
+const db = require("./database");
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// ✅ Middleware to parse JSON
+app.use(express.json());
+
+// ✅ User Registration API
+app.post("/api/register",
+    [
+        body("name").notEmpty().withMessage("Name is required"),
+        body("email").isEmail().withMessage("Valid email is required"),
+        body("password").isLength({ min: 6 }).withMessage("Password must be at least 6 characters"),
+    ],
+    async (req, res) => {
+        // Validate input
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { name, email, password } = req.body;
+
+        try {
+            // Check if user already exists
+            const checkUserQuery = "SELECT * FROM users WHERE email = ?";
+            db.query(checkUserQuery, [email], async (err, result) => {
+                if (err) return res.status(500).json({ error: "Database error" });
+
+                if (result.length > 0) {
+                    return res.status(400).json({ error: "User already exists" });
+                }
+
+                // Hash password
+                const hashedPassword = await bcrypt.hash(password, 10);
+
+                // Insert user into database
+                const insertUserQuery = "INSERT INTO users (name, email, password) VALUES (?, ?, ?)";
+                db.query(insertUserQuery, [name, email, hashedPassword], (err, result) => {
+                    if (err) return res.status(500).json({ error: "Database error" });
+
+                    res.status(201).json({ message: "User registered successfully!" });
+                });
+            });
+        } catch (error) {
+            console.error("❌ Error:", error);
+            res.status(500).json({ error: "Internal server error" });
+        }
+    }
+);
+
+// ✅ User Login API
+const jwt = require("jsonwebtoken"); // Import JWT at the top of server.js
+require("dotenv").config(); // Load environment variables
+
+app.post("/api/login",
+    [
+        body("email").isEmail().withMessage("Valid email is required"),
+        body("password").notEmpty().withMessage("Password is required"),
+    ],
+    async (req, res) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { email, password } = req.body;
+
+        try {
+            // Check if user exists
+            const checkUserQuery = "SELECT * FROM users WHERE email = ?";
+            db.query(checkUserQuery, [email], async (err, result) => {
+                if (err) return res.status(500).json({ error: "Database error" });
+
+                if (result.length === 0) {
+                    return res.status(400).json({ error: "User not found" });
+                }
+
+                const user = result[0];
+
+                // Compare passwords
+                const isMatch = await bcrypt.compare(password, user.password);
+                if (!isMatch) {
+                    return res.status(400).json({ error: "Invalid credentials" });
+                }
+
+                // Generate JWT Token
+                const token = jwt.sign(
+                    { user_id: user.id, email: user.email },
+                    process.env.JWT_SECRET, // Secret key from .env file
+                    { expiresIn: process.env.JWT_EXPIRES_IN || "1h" } // Token expiry
+                );
+
+                res.status(200).json({ message: "Login successful", token });
+            });
+        } catch (error) {
+            res.status(500).json({ error: "Server error" });
+        }
+    }
+);
+
+// ✅ Order Management API
+
+// 📌 1. Place an Order
+app.post("/api/orders", async (req, res) => {
+    const { user_id, restaurant_id, total_price, items } = req.body;
+
+    if (!user_id || !restaurant_id || !total_price || !items || !Array.isArray(items)) {
+        return res.status(400).json({ error: "All fields are required, and items must be an array" });
+    }
+
+    // ✅ Check if user_id exists
+    db.query("SELECT id FROM users WHERE id = ?", [user_id], (err, userResult) => {
+        if (err) return res.status(500).json({ error: "Database error (checking user_id)" });
+        if (userResult.length === 0) return res.status(400).json({ error: "Invalid user_id" });
+
+        // ✅ Check if restaurant_id exists
+        db.query("SELECT id FROM restaurants WHERE id = ?", [restaurant_id], (err, restResult) => {
+            if (err) return res.status(500).json({ error: "Database error (checking restaurant_id)" });
+            if (restResult.length === 0) return res.status(400).json({ error: "Invalid restaurant_id" });
+
+            // ✅ Insert Order into `orders` Table
+            const insertOrderQuery = "INSERT INTO orders (user_id, restaurant_id, total_price) VALUES (?, ?, ?)";
+            db.query(insertOrderQuery, [user_id, restaurant_id, total_price], (err, orderResult) => {
+                if (err) {
+                    console.error("❌ Database error (orders):", err);
+                    return res.status(500).json({ error: "Database error (orders)" });
+                }
+
+                const orderId = orderResult.insertId;
+
+                // ✅ Insert Items into `order_items` Table
+                const insertOrderItemsQuery = "INSERT INTO order_items (order_id, item_name, quantity) VALUES ?";
+                const orderItemsData = items.map(item => [orderId, item.item, item.quantity]);
+
+                db.query(insertOrderItemsQuery, [orderItemsData], (err) => {
+                    if (err) {
+                        console.error("❌ Database error (order_items):", err);
+                        return res.status(500).json({ error: "Database error (order_items)" });
+                    }
+
+                    res.status(201).json({ message: "Order placed successfully!", order_id: orderId });
+                });
+            });
+        });
+    });
+});
+
+
+// 📌 2. Get Orders for a Specific User
+app.get("/api/orders/:user_id", async (req, res) => {
+    const { user_id } = req.params;
+
+    const getUserOrdersQuery = "SELECT * FROM orders WHERE user_id = ?";
+    
+    db.query(getUserOrdersQuery, [user_id], (err, results) => {
+        if (err) return res.status(500).json({ error: "Database error" });
+
+        res.status(200).json({ orders: results });
+    });
+});
+
+// 📌 3. Update Order Status
+app.put("/api/orders/:order_id", async (req, res) => {
+    const { order_id } = req.params;
+    const { status } = req.body;
+
+    if (!["pending", "completed", "cancelled"].includes(status)) {
+        return res.status(400).json({ error: "Invalid order status" });
+    }
+
+    const updateOrderQuery = "UPDATE orders SET status = ? WHERE id = ?";
+    
+    db.query(updateOrderQuery, [status, order_id], (err, result) => {
+        if (err) return res.status(500).json({ error: "Database error" });
+
+        res.status(200).json({ message: "Order status updated successfully!" });
+    });
+});
+app.delete("/api/orders/:order_id", async (req, res) => {
+    const { order_id } = req.params;
+
+    const deleteOrderQuery = "DELETE FROM orders WHERE id = ?";
+    db.query(deleteOrderQuery, [order_id], (err, result) => {
+        if (err) return res.status(500).json({ error: "Database error" });
+
+        res.status(200).json({ message: "Order deleted successfully!" });
+    });
+});
+
+
+// ✅ Start Server
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+});
